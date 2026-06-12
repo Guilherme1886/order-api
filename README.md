@@ -11,6 +11,7 @@ A production-style order management REST API built with Clean Architecture princ
 | Persistence  | Spring Data JPA + Hibernate 6       |
 | Database     | PostgreSQL 16                       |
 | Migrations   | Flyway                              |
+| Messaging    | Apache Kafka (KRaft) + Spring Kafka |
 | Build        | Gradle (Kotlin DSL)                 |
 | Containers   | Docker Compose                      |
 | Testing      | JUnit 5 + Testcontainers + Awaitility |
@@ -41,6 +42,9 @@ Four-layer Clean Architecture. Dependencies point inward — domain has zero fra
 │               OutboxEventEntity)             │
 │  repository/  JPA implementations            │
 │  outbox/      OutboxPublisher (@Scheduled)   │
+│  kafka/       KafkaProducerConfig            │
+│               OrderEventConsumer             │
+│               OrderStatusChangedEvent        │
 │  config/      JacksonConfig                  │
 └─────────────────────────────────────────────┘
 ```
@@ -69,7 +73,7 @@ Every state change writes an event to the `outbox_events` table in the **same da
 │        OutboxPublisher (every 5s)        │
 │                                          │
 │  1. SELECT * FROM outbox WHERE PENDING   │
-│  2. Publish (log / message broker)       │
+│  2. Publish to Kafka (orders.status.*)   │
 │  3. UPDATE status = PUBLISHED            │
 └──────────────────────────────────────────┘
 ```
@@ -78,6 +82,65 @@ Every state change writes an event to the `outbox_events` table in the **same da
 - No dual-write problem — if the transaction rolls back, the event is never created.
 - At-least-once delivery guarantee without distributed transactions.
 - Events survive application crashes — they persist in the database until published.
+
+## Kafka & Event Streaming
+
+The `OutboxPublisher` is the bridge between the database and the event bus: it drains `PENDING` rows from the outbox and publishes each one to **Apache Kafka** (running in KRaft mode — no ZooKeeper). Downstream consumers subscribe to the topic and react to order lifecycle changes, fully decoupled from the write path.
+
+```
+┌──────────────┐   @Transactional   ┌──────────────┐
+│  order-api   │  ───────────────►  │   outbox     │   (Postgres)
+│  use cases   │   order + event    │   _events    │
+└──────────────┘   single commit    └──────┬───────┘
+                                            │ poll (every 5s)
+                                            ▼
+                                   ┌──────────────────┐
+                                   │  OutboxPublisher │
+                                   │  (@Scheduled)    │
+                                   └────────┬─────────┘
+                                            │ KafkaTemplate.send()
+                                            │ key = orderId
+                                            ▼
+                              ┌───────────────────────────┐
+                              │   Kafka topic              │
+                              │   orders.status.changed    │
+                              └─────────────┬──────────────┘
+                                            │
+                          ┌─────────────────┼─────────────────┐
+                          ▼                 ▼                 ▼
+                 ┌─────────────────┐  ┌──────────────┐  ┌──────────────┐
+                 │ OrderEventConsumer│ │ (future)     │  │ (future)     │
+                 │ @KafkaListener   │  │ payment-api  │  │ notification │
+                 └─────────────────┘  └──────────────┘  └──────────────┘
+```
+
+**How the Outbox guarantees atomicity *with* Kafka**
+
+Kafka is not transactional with PostgreSQL — you cannot commit a database row and a Kafka record in one atomic operation. The Outbox sidesteps this:
+
+1. The use case writes the order **and** the outbox event in a single DB transaction. If anything fails, both roll back — no phantom events.
+2. The `OutboxPublisher` runs *after* commit, reading only durably-persisted rows. A row is marked `PUBLISHED` only once it has been handed to Kafka.
+3. If the app crashes between publish and mark, the event is simply re-published on the next poll — **at-least-once** delivery. Consumers must be idempotent (the message is keyed by `orderId` so order events land on the same partition, preserving per-order ordering).
+
+This is the standard Transactional Outbox pattern: the database is the source of truth, and Kafka eventually reflects every committed change without a distributed transaction.
+
+**Topics**
+
+| Topic                   | Key       | Value (JSON)                              | Producer         | Consumer            |
+|-------------------------|-----------|-------------------------------------------|------------------|---------------------|
+| `orders.status.changed` | `orderId` | `{ id, status, customerId, updatedAt }`   | `OutboxPublisher`| `OrderEventConsumer`|
+
+The topic is auto-created on first publish (single partition, replication factor 1 for local dev).
+
+**Kafka UI**
+
+A [Kafka UI](https://github.com/provectus/kafka-ui) instance ships in `docker-compose.yml` for inspecting topics, partitions, consumer groups, and live messages:
+
+```
+http://localhost:8090
+```
+
+Browse to **Topics → `orders.status.changed` → Messages** to watch events flow in as you create and update orders.
 
 ## Endpoints
 
@@ -257,14 +320,14 @@ Both `CreateOrderUseCase` and `UpdateOrderStatusUseCase` run inside `@Transactio
 **Prerequisites:** Docker, Java 21.
 
 ```bash
-# Start PostgreSQL
+# Start PostgreSQL, Kafka (KRaft) and Kafka UI
 docker compose up -d
 
 # Run the application
 ./gradlew bootRun
 ```
 
-The API starts on `http://localhost:8082`.
+The API starts on `http://localhost:8082`, and Kafka UI on `http://localhost:8090`.
 
 ```bash
 # Quick smoke test
@@ -305,7 +368,7 @@ H2 and embedded databases diverge from PostgreSQL in subtle ways: enum handling,
 
 ## Next Steps
 
-- **Kafka integration** — Replace the `@Scheduled` outbox publisher with a Kafka Connect CDC connector (Debezium) or a Kafka producer, delivering events to downstream consumers in near real-time.
-- **Saga Pattern** — Orchestrate cross-service workflows with `payment-api` and `notification-api`. Order creation triggers a payment saga; payment confirmation triggers shipping and customer notification.
+- **Debezium CDC** — Replace the `@Scheduled` poller with a Kafka Connect CDC connector (Debezium) that streams outbox rows to Kafka via the Postgres WAL, eliminating polling lag entirely.
+- **Saga Pattern** — Orchestrate cross-service workflows with `payment-api` and `notification-api` consuming `orders.status.changed`. Order creation triggers a payment saga; payment confirmation triggers shipping and customer notification.
 - **Observability** — Add structured logging, distributed tracing (OpenTelemetry), and metrics export to Datadog or Prometheus/Grafana. Track order creation rate, status transition latency, and outbox publish lag.
 - **Rate limiting** — Protect the API with per-client rate limits (Bucket4j or Spring Cloud Gateway) to prevent abuse on write endpoints.

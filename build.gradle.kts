@@ -24,6 +24,7 @@ dependencies {
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("com.fasterxml.jackson.core:jackson-databind")
+    implementation("org.springframework.kafka:spring-kafka")
 
     runtimeOnly("org.postgresql:postgresql")
 
