@@ -1,0 +1,23 @@
+# Build output
+build/
+.gradle/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Docs & local infra (not needed in the image)
+README.md
+docker-compose.yml
+
+# OS
+.DS_Store
+
+# Secrets
+.env
+*.local

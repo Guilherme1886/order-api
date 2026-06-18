@@ -1,23 +1,37 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5434/orderdb
-    username: order
-    password: order123
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/orderdb}
+    username: ${SPRING_DATASOURCE_USERNAME:order}
+    password: ${SPRING_DATASOURCE_PASSWORD:order123}
+    hikari:
+      # Pin the connection search_path so unqualified SQL resolves to the orders schema.
+      schema: orders
   jpa:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+    properties:
+      hibernate:
+        default_schema: orders
   flyway:
     enabled: true
     locations: classpath:db/migration
+    schemas: orders
+    default-schema: orders
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
       group-id: order-events-consumer
       auto-offset-reset: earliest
 
+# Kafka integration toggle. Defaults to enabled for local/dev/tests;
+# set KAFKA_ENABLED=false to deploy without a broker (outbox accumulates,
+# producer/consumer/publisher beans are not loaded).
+kafka:
+  enabled: ${KAFKA_ENABLED:true}
+
 server:
-  port: 8082
+  port: ${PORT:8082}
 
 outbox:
   publish-interval-ms: 5000
