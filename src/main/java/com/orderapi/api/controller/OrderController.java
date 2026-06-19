@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
@@ -31,8 +32,9 @@ public class OrderController {
     }
 
     @PostMapping
-    public ResponseEntity<OrderResponse> create(@Valid @RequestBody CreateOrderRequest request) {
-        var order = createOrderUseCase.execute(request);
+    public ResponseEntity<OrderResponse> create(@Valid @RequestBody CreateOrderRequest request,
+                                                @AuthenticationPrincipal UUID authenticatedUserId) {
+        var order = createOrderUseCase.execute(request, authenticatedUserId);
         var location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}")
                 .buildAndExpand(order.getId())

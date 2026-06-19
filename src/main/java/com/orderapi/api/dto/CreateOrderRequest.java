@@ -2,12 +2,14 @@ package com.orderapi.api.dto;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.NotNull;
 
 import java.util.List;
-import java.util.UUID;
 
+/**
+ * The order's customer is taken from the authenticated principal (the JWT
+ * subject), not from the request body, so a client cannot place an order on
+ * behalf of another customer.
+ */
 public record CreateOrderRequest(
-        @NotNull UUID customerId,
         @NotEmpty @Valid List<OrderItemRequest> items
 ) {}

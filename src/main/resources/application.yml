@@ -33,5 +33,9 @@ kafka:
 server:
   port: ${PORT:8082}
 
+auth:
+  service:
+    url: ${AUTH_SERVICE_URL:http://localhost:8080}
+
 outbox:
   publish-interval-ms: 5000

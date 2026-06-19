@@ -7,8 +7,6 @@ import com.orderapi.api.dto.UpdateStatusRequest;
 import com.orderapi.domain.model.OrderStatus;
 import com.orderapi.domain.model.OutboxEvent.OutboxStatus;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
@@ -24,15 +22,11 @@ import static org.awaitility.Awaitility.await;
 
 class OrderIntegrationTest extends IntegrationTestBase {
 
-    @Autowired
-    TestRestTemplate rest;
-
     // ========== 1. Criação de pedido — atomicidade com Outbox ==========
 
     @Test
     void shouldCreateOrderWithOutboxEventAtomically() {
         var request = new CreateOrderRequest(
-                UUID.randomUUID(),
                 List.of(
                         new OrderItemRequest(UUID.randomUUID(), "Notebook", 2, new BigDecimal("3500.00")),
                         new OrderItemRequest(UUID.randomUUID(), "Mouse", 1, new BigDecimal("120.00"))
@@ -46,6 +40,8 @@ class OrderIntegrationTest extends IntegrationTestBase {
         assertThat(body.status()).isEqualTo(OrderStatus.PENDING);
         assertThat(body.totalAmount()).isEqualByComparingTo(new BigDecimal("7120.00"));
         assertThat(body.items()).hasSize(2);
+        // customerId comes from the authenticated principal (token), not the request body
+        assertThat(body.customerId()).isEqualTo(DEFAULT_USER_ID);
 
         var orderInDb = orderJpa.findById(body.id());
         assertThat(orderInDb).isPresent();
@@ -182,7 +178,6 @@ class OrderIntegrationTest extends IntegrationTestBase {
 
     private UUID createPendingOrder() {
         var request = new CreateOrderRequest(
-                UUID.randomUUID(),
                 List.of(new OrderItemRequest(
                         UUID.randomUUID(), "Item", 1, new BigDecimal("100.00"))));
         var response = rest.postForEntity("/orders", request, OrderResponse.class);

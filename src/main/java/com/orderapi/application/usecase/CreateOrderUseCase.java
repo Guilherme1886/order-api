@@ -27,14 +27,14 @@ public class CreateOrderUseCase {
     }
 
     @Transactional
-    public Order execute(CreateOrderRequest request) {
+    public Order execute(CreateOrderRequest request, UUID authenticatedUserId) {
         var items = request.items().stream()
                 .map(r -> new OrderItem(
                         UUID.randomUUID(), null, r.productId(),
                         r.productName(), r.quantity(), r.unitPrice()))
                 .toList();
 
-        var order = Order.create(request.customerId(), items);
+        var order = Order.create(authenticatedUserId, items);
         var saved = orderRepository.save(order);
 
         var event = OutboxEvent.create(
