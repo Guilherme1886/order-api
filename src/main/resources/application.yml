@@ -23,6 +23,8 @@ spring:
     consumer:
       group-id: order-events-consumer
       auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 # Kafka integration toggle. Defaults to enabled for local/dev/tests;
 # set KAFKA_ENABLED=false to deploy without a broker (outbox accumulates,
